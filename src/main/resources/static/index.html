@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal Chat</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; }
+        #chat-container { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+        .message { padding: 12px 16px; border-radius: 12px; background: #f0f0f0; max-width: 75%; align-self: flex-start; min-width: 80px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); border: 1px solid rgba(0,0,0,0.05); }
+        .message.own { background: #007bff; color: white; align-self: flex-end; border-color: #0069d9; }
+        .sender { font-size: 0.85em; font-weight: bold; margin-bottom: 6px; display: block; border-bottom: 1px solid rgba(0,0,0,0.05); padding-bottom: 4px; }
+        .message.own .sender { border-bottom: 1px solid rgba(255,255,255,0.2); }
+        .timestamp { font-size: 0.75em; color: #888; margin-left: 8px; font-weight: normal; }
+        .message.own .timestamp { color: rgba(255,255,255,0.7); }
+        .message.system { align-self: center; background: transparent; border: none; box-shadow: none; color: #888; font-style: italic; font-size: 0.9em; padding: 4px; }
+        .message.system .sender { display: none; }
+        .message-text { font-size: 1em; line-height: 1.4; word-wrap: break-word; }
+        #input-area { padding: 20px; border-top: 1px solid #ddd; display: flex; gap: 10px; background: white; }
+        input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div id="chat-container"></div>
+
+<div id="input-area">
+    <input type="text" id="username" placeholder="Username" style="flex: 0 0 100px;">
+    <input type="text" id="message" placeholder="Type a message...">
+    <button onclick="sendMessage()">Send</button>
+</div>
+
+<script>
+    let stompClient = null;
+    const chatContainer = document.getElementById('chat-container');
+    const userColors = {};
+
+    function getNextColor(username) {
+        if (userColors[username]) return userColors[username];
+        
+        // Generate a more visible pastel color (slightly more saturated)
+        const hue = Math.floor(Math.random() * 360);
+        const color = `hsl(${hue}, 75%, 85%)`;
+        userColors[username] = color;
+        return color;
+    }
+
+    function connect() {
+        const socket = new SockJS('/ws-chat');
+        stompClient = Stomp.over(socket);
+        stompClient.connect({}, (frame) => {
+            console.log('Connected: ' + frame);
+            stompClient.subscribe('/topic/messages', (sdkEvent) => {
+                onMessageReceived(JSON.parse(sdkEvent.body));
+            });
+        });
+    }
+
+    function sendMessage() {
+        const usernameInput = document.getElementById('username');
+        const username = usernameInput.value.trim();
+        const content = document.getElementById('message').value.trim();
+        
+        if (content && username && stompClient) {
+            const chatMessage = { sender: username, content: content };
+            stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(chatMessage));
+            document.getElementById('message').value = '';
+            
+            // Disable username input after first message
+            if (!usernameInput.disabled) {
+                usernameInput.disabled = true;
+            }
+        }
+    }
+
+    function onMessageReceived(message) {
+        const messageElement = document.createElement('div');
+        messageElement.classList.add('message');
+        
+        const username = document.getElementById('username').value.trim();
+        let displaySender = message.sender;
+
+        if (message.sender === 'System') {
+            messageElement.classList.add('system');
+        } else if (message.sender === username) {
+            messageElement.classList.add('own');
+            displaySender = "You: " + message.sender;
+        } else {
+            messageElement.style.backgroundColor = getNextColor(message.sender);
+        }
+
+        messageElement.innerHTML = `
+            <span class="sender">
+                ${displaySender}
+                <span class="timestamp">${message.timestamp}</span>
+            </span>
+            <div class="message-text">${message.content}</div>
+        `;
+        chatContainer.appendChild(messageElement);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    window.onload = function() {
+        connect();
+        document.getElementById('message').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    };
+</script>
+
+</body>
+</html>
